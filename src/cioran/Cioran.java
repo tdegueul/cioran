@@ -16,9 +16,14 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.apache.maven.model.Build;
@@ -57,8 +62,9 @@ public class Cioran {
 			System.out.println("Updated POM file at " + pomFile.toAbsolutePath());
 
 			// Step 4: Run Maven and record the output
-			List<String> compilationErrors = runMaven(pomFile);
-			System.out.println(String.join("\n", compilationErrors));
+			List<CompilationMessage> compilationErrors = runMaven(pomFile);
+			System.out.println(String.join("\n",
+					compilationErrors.stream().map(CompilationMessage::toString).collect(Collectors.toList())));
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
@@ -68,7 +74,7 @@ public class Cioran {
 		AetherDownloader downloader = new AetherDownloader(10);
 		Artifact client = new DefaultArtifact(clientCoord);
 		Artifact local = downloader.downloadArtifactTo(client, "local-repo");
-		
+
 		runFromJar(local.getFile().toPath(), groupId, artifactId, v1, v2);
 	}
 
@@ -146,18 +152,21 @@ public class Cioran {
 		}
 	}
 
-	private List<String> runMaven(Path pomFile) throws IOException, InterruptedException {
-		List<String> errors = new ArrayList<>();
-		ProcessBuilder pb = new ProcessBuilder(MAVEN, "clean", "compile");
+	// FIXME: Ugly as fuck
+	private List<CompilationMessage> runMaven(Path pomFile) throws IOException, InterruptedException {
+		List<CompilationMessage> errors = new ArrayList<>();
+		ProcessBuilder pb = new ProcessBuilder(MAVEN, "clean", "compile", "--fail-at-end");
 		pb.directory(pomFile.getParent().toFile());
 
 		Process process = pb.start();
 		try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-			String currentLine;
+			String currentLine = reader.readLine();
 
-			// FIXME: Ugly as fuck
+			Pattern errorPattern = Pattern.compile("\\[ERROR\\]\\s+(.+):\\[([0-9]+),([0-9]+)\\]\\s+(.+)");
+			Pattern paramPattern = Pattern.compile("\\[ERROR\\]\\s+(.+):\\s+(.+)");
+
 			boolean recording = false;
-			while ((currentLine = reader.readLine()) != null) {
+			while (currentLine != null) {
 				if (currentLine.contains("Finished at:"))
 					recording = true;
 
@@ -165,10 +174,43 @@ public class Cioran {
 					recording = false;
 
 				if (recording) {
-					if (currentLine.startsWith("[ERROR] ") && !currentLine.equals("[ERROR] ")) {
-						errors.add(currentLine);
+					if (currentLine.startsWith("[ERROR] /")) {
+						System.out.println("1 Matching with " + currentLine);
+						Matcher errorMatcher = errorPattern.matcher(currentLine);
+
+						if (errorMatcher.matches()) {
+							String path = errorMatcher.group(1);
+							int line = Integer.parseInt(errorMatcher.group(2));
+							int offset = Integer.parseInt(errorMatcher.group(3));
+							String message = errorMatcher.group(4);
+							Map<String, String> params = new HashMap<>();
+
+							// Attempt to match other information
+							currentLine = reader.readLine();
+							while (currentLine != null && !currentLine.startsWith("[ERROR] /")) {
+								System.out.println("2 Matching with " + currentLine);
+								Matcher paramMatcher = paramPattern.matcher(currentLine);
+
+								if (paramMatcher.matches()) {
+									String key = paramMatcher.group(1);
+									String value = paramMatcher.group(2);
+									params.put(key, value);
+								} else {
+									System.out.println("Couldn't parse " + currentLine);
+								}
+
+								currentLine = reader.readLine();
+							}
+
+							errors.add(new CompilationMessage(path, line, offset, message, params));
+							continue;
+						} else {
+							System.out.println("Couldn't parse " + currentLine);
+						}
 					}
 				}
+
+				currentLine = reader.readLine();
 			}
 		}
 
@@ -231,15 +273,24 @@ public class Cioran {
 	public static void main(String[] args) {
 		Cioran c = new Cioran();
 
-		Path clientJar = Paths.get("data/guava-client-0.0.1.jar");
-		String clientCoord = "com.google.cloud.genomics:google-genomics-utils:0.10";
-		String libGroupId = "com.google.guava";
-		String libArtifactId = "guava";
-		String v1 = "17.0";
-		String v2 = "18.0";
+//		Path clientJar = Paths.get("data/guava-client-0.0.1.jar");
+//		String clientCoord = "com.google.cloud.genomics:google-genomics-utils:0.10";
+//		String libGroupId = "com.google.guava";
+//		String libArtifactId = "guava";
+//		String v1 = "17.0";
+//		String v2 = "18.0";
+//
+//		System.out.println("### ANALYZING A LOCAL JAR ###");
+//		c.runFromJar(clientJar, libGroupId, libArtifactId, v1, v2);
+//
+//		System.out.println("### ANALYZING A JAR ON MAVEN CENTRAL ###");
+//		c.runFromMaven(clientCoord, libGroupId, libArtifactId, v1, v2);
 
-		System.out.println("### ANALYZING A LOCAL JAR ###");
-		c.runFromJar(clientJar, libGroupId, libArtifactId, v1, v2);
+		String clientCoord = "maracas-data:comp-changes-client:0.0.1";
+		String libGroupId = "maracas-data";
+		String libArtifactId = "comp-changes";
+		String v1 = "0.0.1";
+		String v2 = "0.0.2";
 
 		System.out.println("### ANALYZING A JAR ON MAVEN CENTRAL ###");
 		c.runFromMaven(clientCoord, libGroupId, libArtifactId, v1, v2);
