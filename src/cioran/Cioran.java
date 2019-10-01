@@ -31,11 +31,15 @@ import org.apache.maven.model.io.xpp3.MavenXpp3Writer;
 import org.codehaus.plexus.util.xml.Xpp3Dom;
 import org.codehaus.plexus.util.xml.Xpp3DomBuilder;
 import org.codehaus.plexus.util.xml.pull.XmlPullParserException;
+import org.eclipse.aether.artifact.Artifact;
+import org.eclipse.aether.artifact.DefaultArtifact;
+
+import nl.cwi.swat.aethereal.AetherDownloader;
 
 public class Cioran {
 	public final static String MAVEN = "/usr/bin/mvn";
 
-	void run(Path clientJar, String groupId, String artifactId, String v1, String v2) {
+	void runFromJar(Path clientJar, String groupId, String artifactId, String v1, String v2) {
 		try {
 			Path extractDest = Paths.get(clientJar.getFileName().toString());
 
@@ -58,6 +62,14 @@ public class Cioran {
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
+	}
+
+	void runFromMaven(String clientCoord, String groupId, String artifactId, String v1, String v2) {
+		AetherDownloader downloader = new AetherDownloader(10);
+		Artifact client = new DefaultArtifact(clientCoord);
+		Artifact local = downloader.downloadArtifactTo(client, "local-repo");
+		
+		runFromJar(local.getFile().toPath(), groupId, artifactId, v1, v2);
 	}
 
 	private void extractJAR(Path jar, Path dest) throws IOException {
@@ -148,7 +160,7 @@ public class Cioran {
 			while ((currentLine = reader.readLine()) != null) {
 				if (currentLine.contains("Finished at:"))
 					recording = true;
-				
+
 				if (currentLine.startsWith("[ERROR] -> [Help 1]"))
 					recording = false;
 
@@ -217,13 +229,19 @@ public class Cioran {
 	}
 
 	public static void main(String[] args) {
+		Cioran c = new Cioran();
+
 		Path clientJar = Paths.get("data/guava-client-0.0.1.jar");
+		String clientCoord = "com.google.cloud.genomics:google-genomics-utils:0.10";
 		String libGroupId = "com.google.guava";
 		String libArtifactId = "guava";
 		String v1 = "17.0";
 		String v2 = "18.0";
 
-		Cioran c = new Cioran();
-		c.run(clientJar, libGroupId, libArtifactId, v1, v2);
+		System.out.println("### ANALYZING A LOCAL JAR ###");
+		c.runFromJar(clientJar, libGroupId, libArtifactId, v1, v2);
+
+		System.out.println("### ANALYZING A JAR ON MAVEN CENTRAL ###");
+		c.runFromMaven(clientCoord, libGroupId, libArtifactId, v1, v2);
 	}
 }

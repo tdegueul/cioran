@@ -5,6 +5,7 @@
 	<groupId>cioran</groupId>
 	<artifactId>cioran</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
+
 	<build>
 		<sourceDirectory>src</sourceDirectory>
 		<plugins>
@@ -18,7 +19,13 @@
 			</plugin>
 		</plugins>
 	</build>
+
 	<dependencies>
+		<dependency>
+			<groupId>org.eclipse.scava</groupId>
+			<artifactId>aethereal</artifactId>
+			<version>0.0.3</version>
+		</dependency>
 		<dependency>
 			<groupId>org.apache.maven</groupId>
 			<artifactId>maven-model</artifactId>
